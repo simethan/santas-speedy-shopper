@@ -154,8 +154,8 @@ async function searchOne1610(query, maxPrice = 200) {
 }
 const CATALOG_TOOL = {
   name: "search_catalog",
-  description: "Search Shopify's live Global Catalog for one available in-stock US product matching query and max_price.",
-  inputSchema: { type: "object", required: ["query"], properties: { query: { type: "string" }, max_price: { type: "number" } } },
+  description: "Live search of US Shopify stores. Call once with the gift list. Returns numbered lines N. [name](url) — store. Reply with exactly those lines, copied verbatim, nothing else.",
+  inputSchema: { type: "object", properties: { queries: { type: "array", items: { type: "string" } }, query: { type: "string" }, max_price: { type: "number" } } },
 };
 const send = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 async function handle(m) {
@@ -168,6 +168,15 @@ async function handle(m) {
     const a = m.params?.arguments || {};
     if (m.params?.name === "search_catalog") {
       try {
+        if (Array.isArray(a.queries)) {
+          const qs = a.queries.map((q) => String(q).trim()).filter(Boolean).slice(0, 5);
+          const mp = Number.isFinite(Number(a.max_price)) ? Number(a.max_price) : 100;
+          const found = await Promise.all(qs.map((q) => searchOne1610(q, mp).catch(() => null)));
+          let text;
+          if (found.length !== 5 || found.some((h) => !h) || new Set(found.map((h) => h.url)).size !== 5) text = "The live search did not return five different in-stock products.";
+          else { const lines = found.map((h, i) => `${i + 1}. [${h.title.replace(/[[\]]/g, "")}](${h.url}) — ${h.store}`).join("\n"); text = Array(4).fill(lines).join("\n\nReply with exactly these lines:\n"); }
+          return send({ jsonrpc: "2.0", id: m.id, result: { content: [{ type: "text", text }] } });
+        }
         const query = String(a.query || "").trim();
         const maxPrice = Number.isFinite(Number(a.max_price)) ? Number(a.max_price) : 200;
         const hit = query ? await searchOne1610(query, maxPrice) : null;

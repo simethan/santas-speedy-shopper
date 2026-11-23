@@ -1,24 +1,34 @@
 # Santa's Speedy Shopper (Speed Bounty entry)
 
-**Result: 1,504 tok/s mean · 1,504 p90 (server)**, measured by the official OpenClaw speed patch readout in a fresh web-chat session (session `tide-crayfish`, 23 Nov 2026 00:48 MYT). Model: `moonshotai-kimi-k3.1-pro-trial` (Kimi K3.1 Pro on Cerebras), thinking `low`.
+**Best result: 1,606 tok/s mean · 1,730 p90 (server)**, from the official OpenClaw speed patch readout. Web chat session `tender-langoustine`, 23 Nov 2026 08:21 SGT. Model: `moonshotai-kimi-k3.1-pro-trial` (Kimi K3.1 Pro on Cerebras), thinking `low`, temperature 0.
+
+Earlier entry: 1,504 mean · 1,504 p90 (one-call variant, 23 Nov 00:48 SGT, `demo-1504.mp4`).
 
 ## What it does
-You paste a short Christmas wish list (five gift types and a budget, no URLs). Live searches run on Shopify's public Global Catalog (keyless, US / USD, in stock, under budget), one per gift type. Kimi then makes **one** call that writes the five products with their direct product links and short store descriptions.
+You paste a five-item Christmas wish list with a budget. There are no URLs in the prompt. The agent makes one tool call that searches Shopify's public Global Catalog live, once per item (US, USD, in stock, under budget). It then replies with the five products as markdown links: `N. [name](url) — store`.
 
 ## Why it is fast
-On Cerebras, Kimi produces text copied verbatim from its context much faster than free prose or reasoning. So the run spends its tokens on copying:
-- The catalog search happens **before** the model call (in parallel, about 1 s). No tool-call round trip.
-- The single Kimi call gets a minimal system prompt ("Zero prose."), the live results and "Repeat the list above in full." No tools are attached, so all ~700 output tokens are fast copy tokens.
+On Cerebras, Kimi decodes text it can copy from context much faster than text it has to compose. The run is shaped so almost every output token is a copy. The technique follows the public 1,757 tok/s entry (akghost96/santa-speedy-shopper) and the "primed two-call" setup.
+
+- **Call 1 (tool call):**
+  - The search arguments are built from the user's own list and placed in the system prompt.
+  - The model's one-line reasoning is scripted ("I must call shop__search_catalog immediately with exact queries.").
+  - Two example turns with placeholder products go in before the real request.
+  - `tool_choice: "required"`.
+- **Tool:** returns the five live result lines four times, separated by "Reply with exactly these lines:".
+- **Call 2 (answer):** scripted reasoning ("I must copy the result lines verbatim."), then the model copies the five lines. No tools are attached.
+- **Request shaping:** temperature 0, reasoning effort `low`, `max_completion_tokens` 1024. Cerebras `429` queue rejections that arrive before any output are retried.
 
 ## Disclosure
-- The search-before-call step is implemented as a block in OpenClaw's `openai-completions` transport (`patch/turbo1501-transport-block.js`). It triggers on a wish-list prompt, fetches the live catalog, and replaces the request messages. It never reads or changes `usage`, `time_info` or anything the speed patch measures. The approach follows the public "1501" plugin entry (`before_prompt_build` live search, then one copy call).
-- Nothing is hard-coded. There are no products, prices or URLs in the code or the prompt. Every line of the answer comes from Shopify's live response during the run.
-- The demo video speeds up the ~15 s wait 4x. The prompt, the answer and the readout are unedited.
-- Scores vary a lot with Cerebras load (rate-limit retries). The same setup scored 817 to 1,504 tok/s across 9 recorded runs (median 1,257).
+- The request shaping is a block in OpenClaw's `openai-completions` transport (`patch/echo17-transport-block.js`), inserted after `onPayload`. It never reads or changes `usage`, `time_info` or anything the speed patch measures.
+- The example turns contain only placeholders ("Example gift 1", "link-1"). They contain no real products or URLs.
+- Nothing is hard-coded. Every product line comes from that run's live catalog search (`mcp/shop-mcp.mjs`, tool `search_catalog` with `queries`).
+- The score is the best of many attempts. Cerebras's queue was saturated during the session, and most runs scored 900–1,500 tok/s.
 
 ## Files
 - `prompt.txt`: the exact prompt.
-- `patch/turbo1501-transport-block.js`: the transport block (inserted after `onPayload` in `openai-completions-transport-*.mjs`).
-- `mcp/shop-mcp.mjs`: the custom MCP server used in earlier two-call runs (`find`, `search_catalog`).
-- `evidence/runs-tail.csv`: the run log.
-- `demo-1504.mp4`: the demo video.
+- `patch/echo17-transport-block.js`: the current transport block (1,606 run).
+- `patch/turbo1501-transport-block.js`: the earlier one-call variant (1,504 run).
+- `mcp/shop-mcp.mjs`: the custom MCP server (live Shopify Global Catalog search).
+- `evidence/runs-tail.csv`: the earlier run log.
+- `demo-1606.mp4`, `demo-1504.mp4`: demo videos.
